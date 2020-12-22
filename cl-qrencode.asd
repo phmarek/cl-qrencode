@@ -1,6 +1,9 @@
 ;;;; Copyright (c) 2011-2014 jnjcc, Yste.org. All rights reserved.
 ;;;;
 
+#+(or)
+(ql:quickload :lisp-unit)
+
 (asdf:defsystem #:cl-qrencode
   :description "QR code 2005 encoder in Common Lisp"
   :version "0.1.1"
