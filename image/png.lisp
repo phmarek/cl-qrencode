@@ -19,7 +19,9 @@ pixels for each module, and MARGIN pixels on all four sides"
            (qrpng (make-instance 'zpng:png 
                                  :width size 
                                  :height size 
-                                 :color-type :grayscale))
+                                 ; :color-type :indexed-color :bpp 8
+                                 :color-type :grayscale
+                                 ))
            (qrarray (zpng:data-array qrpng)))
       ;; Paint margins == quiet zone, everything becomes white.
       ;; TODO: should be done in zpng:png initialization directly!
