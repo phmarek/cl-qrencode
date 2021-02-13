@@ -33,8 +33,10 @@
   (let ((ret (make-modules-matrix modules))
         (mask-p (mask-condition mask-ind))
         (darks 0))
-    (dotimes (i modules)
-      (dotimes (j modules)
+    (declare (optimize (speed 3) (safety 1))
+             (type fixnum darks))
+    (dotimes (i (array-dimension matrix 0))
+      (dotimes (j (array-dimension matrix 1))
         (cond
           ((non-mask-module-p matrix i j)
            (setf (aref ret i j) (aref matrix i j)))
@@ -117,6 +119,7 @@
                 (:row 1)
                 (:col modules)))
         (prev :dark))
+    ;; optimize?!
     (labels 
         ((get-elem (idx)
            (row-major-aref matrix (+ base (* idx step))))

@@ -82,6 +82,9 @@
 ;;; :byte mode
 (defun byte->bstream (bytes)
   (declare (type list bytes))
+  (loop for cur in bytes
+        nconc (decimal->bstream (byte-value :byte cur) 8))
+  #+(or)
   (labels ((join (prev cur)
              (append prev (decimal->bstream (byte-value :byte cur) 8))))
     (reduce #'join bytes :initial-value nil)))
