@@ -3,6 +3,8 @@
 
 (in-package #:cl-qrencode)
 
+(deftype bit-stream () `(array bit (*)))
+
 (defclass qr-input ()
   ((bytes
     :initform nil :initarg :bytes :reader bytes :type list
@@ -24,7 +26,7 @@ therefore, unless you know exactly what you are doing, leave this NIL")
     :documentation
     "list of list, of the form ((:mode1 byte ...) (:mode2 byte ...) ...)")
    (bstream
-    :initform nil :reader bstream :type list
+    :initform (new-bit-stream) :reader bstream :type (bit-stream)
     :documentation "list of 0-1 values after encoding SEGMENTS")
    (blocks
     :initform nil :reader blocks :type list
@@ -288,20 +290,20 @@ achieve the most efficient conversion of data"))
               (error "no version to hold ~A bytes" (ceiling blen 8))))))))
 
 (defmethod data-encoding ((input qr-input))
-  (with-slots (version (level ec-level) segments) input
-    (labels ((seg->bstream (seg)
-               (segment->bstream seg version)))
-      (let* ((bs (reduce #'append (mapcar #'seg->bstream segments)
-                         :initial-value nil))
-             (tt (terminator bs version level))
-             ;; connect bit streams in all segment, with terminator appended
-             (bstream (append bs tt)))
-        ;; add padding bits
-        (setf bstream (append bstream (padding-bits bstream)))
-        ;; add pad codewords, finishes data encoding
-        (setf (slot-value input 'bstream)
-              (append bstream
-                      (pad-codewords bstream version level)))))))
+  (let* ((bstream (new-bit-stream)))
+    (with-slots (version (level ec-level) segments) input
+      ;; connect bit streams in all segment, with terminator appended
+      (map nil (lambda (seg)
+                 (segment->bstream bstream seg version))
+           segments)
+      (append-bits bstream (terminator bstream version level))
+      ;; add padding bits
+      (append-bits bstream (padding-bits bstream))
+      ;; add pad codewords
+      (pad-codewords bstream version level)
+      ;; finishes data encoding
+      (setf (slot-value input 'bstream)
+            bstream))))
 
 (defmethod ec-coding ((input qr-input))
   (with-slots (version (level ec-level) bstream) input
@@ -354,10 +356,12 @@ achieve the most efficient conversion of data"))
     (function-patterns matrix version)
     ;; Symbol character placement
     (let* ((rbits (remainder-bits version))
-           (bstream (append (loop for n in msg-codewords
-                                  nconc (decimal->bstream n 8))
-                            ;; data capacity of _symbol_ does not divide by 8
-                            (make-list rbits :initial-element 0))))
+           (bstream (new-bit-stream)))
+      (loop for n in msg-codewords
+            do (decimal->bstream bstream n 8))
+      ;; data capacity of _symbol_ does not divide by 8
+      (dotimes (i rbits)
+        (append-bits bstream '(0)))
       (symbol-character bstream matrix version))))
 
 (defmethod data-masking ((input qr-input))

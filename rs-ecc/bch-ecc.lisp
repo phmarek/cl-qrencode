@@ -9,7 +9,9 @@
 (defun poly-ash (poly s)
   "shift left POLY by S"
   (declare (type list poly))
-  (append poly (make-list s :initial-element 0)))
+  (dotimes (i s)
+    (append-bits poly '(0)))
+  poly)
 (defun poly-multiply (poly b &optional (op #'*))
   "multiply B on every element of POLY using OP"
   (labels ((mult (elem)
@@ -29,7 +31,7 @@
         ((<= (length m) rem) m)
       (let* ((glen (length gen))
              (sft (- (length m) glen))
-             ;; LEAD coffiecient of message polynomial
+             ;; LEAD coefficient of message polynomial
              (lead (car m)))
         (setf m (funcall sub m (poly-ash (funcall mul gen lead) sft)))))))
 
@@ -79,5 +81,7 @@
       ;; x^12 + x^11 + x^10 + x^9 + x^8 + x^5 + x^2 + 1
       (vi-gpoly '(1 1 1 1 1 0 0 1 0 0 1 0 1)))
   (defun version-ecc (version)
-    (let ((seq (decimal->bstream version 6)))
-      (append seq (bch-ecc vi-ecc seq vi-gpoly)))))
+    (let ((bstream (new-bit-stream 200)))
+      (decimal->bstream bstream version 6)
+      (bch-ecc vi-ecc bstream vi-gpoly)
+      bstream)))

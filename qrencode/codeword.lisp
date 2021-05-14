@@ -12,17 +12,36 @@
 
 (defun pad-codewords (bstream version level)
   "add pad codewords (after adding padding-bits) to fill data codeword capacity"
-  (let ((pad-words '((1 1 1 0 1 1 0 0)
-                     (0 0 0 1 0 0 0 1)))
+  (let ((pad-word1 '(1 1 1 0 1 1 0 0))
+        (pad-word2 '(0 0 0 1 0 0 0 1))
         (pad-len (- (data-words-capacity version level)
                     (/ (length bstream) 8)))
         (ret nil))
-    (dotimes (i pad-len)
-      (setf ret (append ret (nth (mod i 2) pad-words))))
-    ret))
+    (tagbody
+      :start
+      (when (minusp pad-len) 
+        (go :end))
+      (append-bits bstream pad-word1)
+      (decf pad-len)
+      (when (minusp pad-len) 
+        (go :end))
+      (append-bits bstream pad-word1)
+      (decf pad-len)
+      (go :start)
+      :end
+      nil)
+    bstream))
 
 (defun bstream->codewords (bstream)
+  ;; convert to vector here
+  ;; (ldb 
   "convert bstream into codewords, as coefficients of the terms of a polynomial"
+  (loop for i below (length bstream) by 8
+        collect (bstream->decimal bstream i 8))
+  #+(or)
+  (loop for b on bstream by (alexandria:curry #'nthcdr 8)
+        collect (bstream->decimal b 8))
+  #+(or)
   (do ((b bstream (nthcdr 8 b))
        (codewords nil))
       ((null b) codewords)

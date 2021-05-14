@@ -4,20 +4,39 @@
 
 (in-package #:cl-qrencode)
 
-(defun decimal->bstream (dec nbits)
-  "using NBITS bits to encode decimal DEC"
-  (let ((bstream nil))
-    (dotimes (i nbits)
-      (if (logbitp i dec)
-          (push 1 bstream)
-          (push 0 bstream)))
-    bstream))
-(defun bstream->decimal (bstream nbits)
-  (declare (type list bstream))
-  (let ((nbits (min nbits (length bstream)))
-        (dec 0))
-    (dotimes (i nbits)
-      (setf dec (+ (* dec 2) (nth i bstream))))
+
+(defun new-bit-stream (&optional (size (* 8 4000)))
+  (make-array size
+              :element-type 'bit
+              :initial-element 0
+              :fill-pointer 0
+              :adjustable t))
+
+(declaim (inline append-bits))
+(defun append-bits (bstream bits)
+  (dolist (bit bits)
+    (vector-push-extend bit
+                        bstream)))
+
+(defun decimal->bstream (bstream dec nbits)
+  "using NBITS bits to encode decimal DEC into BSTREAM"
+  (declare (type (bit-stream) bstream))
+  (dotimes (i nbits)
+    (vector-push-extend (if (logbitp i dec) 
+                            1
+                            0)
+                        bstream)))
+
+(defun bstream->decimal (bstream pos nbits)
+  (declare (type (bit-stream) bstream))
+  (let ((dec 0))
+    (loop 
+      repeat nbits
+      for i from pos
+      while (< i (length bstream))
+      do (setf dec 
+               (+ (* dec 2) 
+                  (bit bstream i))))
     dec))
 
 ;;; :numeric mode
@@ -32,27 +51,24 @@
   "the final one or two digits are converted to 4 or 7 bits respectively"
   (case n
     (0 0) (1 4) (2 7)))
-(defun numeric->bstream (bytes)
+(defun numeric->bstream (bstream bytes)
   (declare (type list bytes))
   (labels ((num-value (byte)
              (byte-value :numeric byte)))
-    (let ((values (mapcar #'num-value bytes))
-          (bstream nil))
+    (let ((values (mapcar #'num-value bytes)))
       (do ((v values (nthcdr 3 v)))
           ((null v) bstream)
         (case (length v)
           (1 ; only 1 digits left
-           (setf bstream
-                 (append bstream (decimal->bstream (group->decimal v 1)
-                                                   (final-digit-bits 1)))))
+           (decimal->bstream bstream
+                             (group->decimal v 1)
+                             (final-digit-bits 1)))
           (2 ; only 2 digits left
-           (setf bstream
-                 (append bstream (decimal->bstream (group->decimal v 2)
-                                                   (final-digit-bits 2)))))
+           (decimal->bstream bstream 
+                             (group->decimal v 2)
+                             (final-digit-bits 2)))
           (otherwise ; at least 3 digits left
-           (setf bstream
-                 (append bstream
-                         (decimal->bstream (group->decimal v 3) 10)))))))))
+            (decimal->bstream bstream (group->decimal v 3) 10)))))))
 
 ;;; :alnum mode
 (defun pair->decimal (values num)
@@ -61,33 +77,24 @@
   (case num
     (1 (nth 0 values))
     (2 (+ (* (nth 0 values) 45) (nth 1 values)))))
-(defun alnum->bstream (bytes)
+(defun alnum->bstream (bstream bytes)
   (declare (type list bytes))
   (labels ((alnum-value (byte)
              (byte-value :alnum byte)))
-    (let ((values (mapcar #'alnum-value bytes))
-          (bstream nil))
+    (let ((values (mapcar #'alnum-value bytes)))
       (do ((v values (nthcdr 2 v)))
           ((null v) bstream)
         (case (length v)
           (1 ; only 1 alnum left
-           (setf bstream
-                 (append bstream
-                         (decimal->bstream (pair->decimal v 1) 6))))
+           (decimal->bstream bstream (pair->decimal v 1) 6))
           (otherwise ; at least 2 alnum left
-           (setf bstream
-                 (append bstream
-                         (decimal->bstream (pair->decimal v 2) 11)))))))))
+            (decimal->bstream bstream (pair->decimal v 2) 11)))))))
 
 ;;; :byte mode
-(defun byte->bstream (bytes)
+(defun byte->bstream (bstream bytes)
   (declare (type list bytes))
-  (loop for cur in bytes
-        nconc (decimal->bstream (byte-value :byte cur) 8))
-  #+(or)
-  (labels ((join (prev cur)
-             (append prev (decimal->bstream (byte-value :byte cur) 8))))
-    (reduce #'join bytes :initial-value nil)))
+  (dolist (byte bytes)
+    (decimal->bstream bstream (byte-value :byte byte) 8)))
 
 ;;; :kanji mode
 (defun kanji->decimal (word range)
@@ -103,27 +110,24 @@
              (byte-value :kanji byte)))
     (let ((values (mapcar #'kanji-value bytes))
           (delta 1)
-          (bstream nil))
+          (bstream (new-bit-stream (+ 20 (* (length values) 13)))))
       (do ((v values (nthcdr delta v)))
           ((null v) bstream)
         (case (length v)
           (1 ; only 1 byte left
-           (setf bstream
-                 (append bstream (decimal->bstream (car v) 13)))
+           (decimal->bstream bstream (car v) 13)
            (setf delta 1))
           (otherwise ; at least 2 bytes left
            (multiple-value-bind (kanji-p word range) (starts-kanji-p v)
-             (if kanji-p
-                 (progn
-                   (setf bstream
-                         (append bstream
-                                 (decimal->bstream (kanji->decimal word range)
-                                                   13)))
-                   (setf delta 2))
-                 (progn
-                   (setf bstream
-                         (append bstream (decimal->bstream (car v) 13)))
-                   (setf delta 1))))))))))
+             (cond
+               (kanji-p
+                (decimal->bstream bstream 
+                                  (kanji->decimal word range)
+                                  13)
+                (setf delta 2))
+               (t
+                (decimal->bstream bstream (car v) 13)
+                (setf delta 1))))))))))
 
 ;;; :eci mode
 (defun eci->bstream (bytes)
@@ -184,14 +188,14 @@
        ;; B = M + C + 13 * D
        (+ m c (* 13 d))))))
 
-(defun segment->bstream (segment version)
+(defun segment->bstream (bstream segment version)
   "SEGMENT (:mode b0 b1 ...) to bit stream under VERSION"
   (declare (type list segment))
   (let* ((mode (car segment))
          (bytes (cdr segment))
          (len (bytes-length bytes mode))
-         (n (char-count-bits version mode))
-         (bstream nil))
-    (append bstream (mode-indicator mode)
-            (decimal->bstream len n) ; character count indicator
-            (funcall (bstream-trans-func mode) bytes))))
+         (n (char-count-bits version mode)))
+    (append-bits bstream (mode-indicator mode))
+    (decimal->bstream bstream len n) ; character count indicator
+    (funcall (bstream-trans-func mode) bstream bytes)
+    bstream))
